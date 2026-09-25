@@ -6,7 +6,10 @@ const state = {
   segments: [],
   valves: [],
   candidates: [], // 选址候选: {id, segment_id, install_cost, close_cost}
+  weights: {}, // 普通节点用水权重(权衡预览录入): nodeId -> number
   result: null,
+  tradeoff: null, // 权衡预览结果; tradeoffIndex 为当前查看的非支配方案
+  tradeoffIndex: 0,
   layout: new Map(), // nodeId -> {x,y}
 };
 
@@ -207,11 +210,26 @@ function renderCandidates() {
     "安装费与关阀代价均为正整数，预览只读、不写入管网与历史方案";
 }
 
+// 普通节点用水权重录入(权衡预览): 仅普通节点需要正整数权重, 不随管网落库
+function renderWeights() {
+  const normals = state.nodes.filter((n) => n.id.trim() && n.role === "normal");
+  $("#table-weights tbody").innerHTML = normals.map((n) => `
+    <tr data-node="${esc(n.id)}">
+      <td><b>${esc(n.id)}</b>${n.label && n.label.trim() ? ` <span class="role-name">(${esc(n.label)})</span>` : ""}</td>
+      <td><input data-weight-input="${esc(n.id)}" type="number" min="1" step="1"
+        value="${esc(state.weights[n.id] ?? 1)}" style="max-width:160px"></td>
+    </tr>`).join("");
+  $("#tradeoff-hint").textContent = normals.length
+    ? `共 ${normals.length} 个普通节点；枚举全部关阀组合(≤2¹⁴)，双目标权衡预览只读`
+    : "当前管网没有普通节点，断水影响恒为 0";
+}
+
 function renderAll() {
   renderNodes();
   renderSegments();
   renderValves();
   renderCandidates();
+  renderWeights();
   drawCanvas();
 }
 
@@ -226,13 +244,13 @@ function bindTable(table, key, defaults) {
     let val = e.target.value;
     if (f === "cost" || f === "install_cost" || f === "close_cost") val = Number(val);
     state[key][i][f] = val;
-    // 节点编号变化会影响管段下拉; 管段/阀门变化会影响候选管段下拉
-    if (key === "nodes") renderSegments();
+    // 节点编号/角色变化会影响管段下拉与权重录入; 管段/阀门变化会影响候选管段下拉
+    if (key === "nodes") { renderSegments(); renderWeights(); }
     if (key === "segments" || key === "valves") renderCandidates();
     drawCanvas();
   });
   table.addEventListener("change", () => {
-    if (key === "nodes") renderSegments();
+    if (key === "nodes") { renderSegments(); renderWeights(); }
     if (key === "segments" || key === "valves") renderCandidates();
     drawCanvas();
   });
@@ -273,6 +291,13 @@ bindTable($("#table-segments"), "segments");
 bindTable($("#table-valves"), "valves");
 bindTable($("#table-candidates"), "candidates");
 $("#node-role-filter").addEventListener("change", renderNodes);
+
+// 普通节点用水权重输入(权衡预览专用, 不落库)
+$("#table-weights").addEventListener("input", (e) => {
+  const id = e.target.dataset.weightInput;
+  if (id === undefined) return;
+  state.weights[id] = e.target.value.trim() === "" ? "" : Number(e.target.value);
+});
 
 // ---------- 结果渲染 ----------
 function showErrors(errors) {
@@ -501,6 +526,134 @@ $("#btn-plan-siting").addEventListener("click", async () => {
     });
     renderSitingResult(r);
     $("#section-siting").scrollIntoView({ behavior: "smooth" });
+  } catch (err) {
+    showErrors(String(err.message).split("\n"));
+  }
+});
+
+// ---------- 关阀成本与断水影响权衡预览 ----------
+// 双目标 Pareto 非支配方案(只读): 不写管网、不入库; 结果展示在 ④ 权衡预览区。
+function clearTradeoffResult() {
+  state.tradeoff = null;
+  state.tradeoffIndex = 0;
+  $("#tradeoff-body").innerHTML = "";
+  $("#tradeoff-banner").classList.add("hidden");
+}
+
+function renderTradeoffResult(r) {
+  state.tradeoff = r;
+  state.tradeoffIndex = 0;
+  const banner = $("#tradeoff-banner");
+  const body = $("#tradeoff-body");
+  banner.classList.remove("hidden", "ok", "bad");
+
+  if (!r.feasible) {
+    banner.classList.add("bad");
+    banner.innerHTML = `<span class="big">✗ 无可权衡方案</span>${esc(r.message)}`;
+    if (r.reason_detail && r.reason_detail.witness_path) {
+      banner.innerHTML += `<br><small>证据通路: ${esc(r.reason_detail.witness_path)}</small>`;
+    }
+    body.innerHTML = `
+      <div class="card"><h3>无解原因</h3>
+        <p>原因代码: <code>${esc(r.reason_code)}</code></p>
+        <p>${esc(r.message)}</p>
+        ${r.reason_detail ? `<pre>${esc(JSON.stringify(r.reason_detail, null, 2))}</pre>` : ""}
+      </div>`;
+    drawCanvas();
+    return;
+  }
+
+  banner.classList.add("ok");
+  banner.innerHTML =
+    `<span class="big">✓ ${r.pareto_count} 个非支配权衡方案</span>${esc(r.message)}` +
+    `<br><small>目标一为关阀代价合计; 目标二为关阀前有水、关阀后断水的普通节点用水权重和。` +
+    `同一对指标仅保留关阀编号升序列表字典序最小者; 点击表中任意行可查看该方案的关阀清单与新增断水节点。</small>`;
+
+  const rows = r.options.map((o, i) => `
+    <tr data-option="${i}" class="option-row${i === 0 ? " selected" : ""}"
+      title="新增断水节点: ${esc(o.newly_disconnected_nodes.join(", ") || "无")}">
+      <td>${o.rank}</td>
+      <td><b>${o.total_cost}</b></td>
+      <td><b>${o.disconnected_impact}</b></td>
+      <td>${o.closed_valves.length ? esc(o.closed_valves.join(", ")) : "（不关阀）"}</td>
+      <td>${o.newly_disconnected_nodes.length
+        ? o.newly_disconnected_nodes
+          .map((id) => `<span class="tag disconnected">${esc(id)}×${esc((o.newly_disconnected_weights.find((x) => x.id === id) || {}).weight ?? "")}</span>`)
+          .join(" ")
+        : "—"}</td>
+    </tr>`).join("");
+
+  body.innerHTML = `
+    <div class="card">
+      <h3>非支配方案列表（按代价、断水影响、关阀编号排序）</h3>
+      <div class="summary">
+        <span>普通节点数: <b>${r.normal_node_count}</b></span>
+        <span>关阀前有水普通节点: <b>${r.initially_supplied_normal_count}</b></span>
+        <span>枚举组合: <b>${r.subset_count}</b></span>
+        <span>可隔离全部漏点: <b>${r.isolating_subset_count}</b></span>
+        <span>可行(且必保点全有水): <b>${r.feasible_subset_count}</b></span>
+        <span>非支配方案: <b>${r.pareto_count}</b></span>
+      </div>
+      <p class="role-name">关阀前已断水的普通节点(不参与断水影响): ${
+        r.initially_disconnected_normal.length ? esc(r.initially_disconnected_normal.join(", ")) : "无"}。
+        列表中不存在某方案两目标都不劣且至少一个更优于它的其他方案。</p>
+      <table id="table-tradeoff"><thead><tr>
+        <th>序号</th><th>目标一: 关阀代价</th><th>目标二: 断水影响(权重和)</th>
+        <th>关阀清单(编号升序)</th><th>新增断水节点(节点×权重)</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    <div id="tradeoff-detail"></div>`;
+
+  body.querySelectorAll("tr.option-row").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      state.tradeoffIndex = Number(tr.dataset.option);
+      body.querySelectorAll("tr.option-row").forEach((x) => x.classList.remove("selected"));
+      tr.classList.add("selected");
+      renderTradeoffDetail();
+    });
+  });
+  renderTradeoffDetail();
+}
+
+function renderTradeoffDetail() {
+  const r = state.tradeoff;
+  const box = $("#tradeoff-detail");
+  if (!r || !r.options.length) { box.innerHTML = ""; return; }
+  const o = r.options[state.tradeoffIndex];
+  box.innerHTML = `
+    <div class="card">
+      <h3>方案 #${o.rank}：关阀代价 ${o.total_cost} ／ 断水影响 ${o.disconnected_impact}</h3>
+      <p class="role-name">关阀清单(${o.closed_count} 个): ${
+        o.closed_valves.length ? esc(o.closed_valves.join(", ")) : "不关任何阀门"};
+      新增断水普通节点(${o.newly_disconnected_count} 个): ${
+        o.newly_disconnected_nodes.length
+          ? esc(o.newly_disconnected_nodes.join(", "))
+          : "无"}（仅计关阀前有水的普通节点, 漏点同分量节点与原本断水节点不计）。</p>
+    </div>
+    <div class="card">
+      <h3>各节点供水状态（该方案执行后）</h3>
+      ${nodeStatusTable(o.node_status)}
+    </div>
+    <div class="card">
+      <h3>各管段状态（该方案执行后）</h3>
+      ${segmentStatusTable(o.segment_status)}
+    </div>`;
+  drawCanvas();
+}
+
+$("#btn-plan-tradeoff").addEventListener("click", async () => {
+  clearErrors();
+  const weights = {};
+  state.nodes
+    .filter((n) => n.id.trim() && n.role === "normal")
+    .forEach((n) => { weights[n.id.trim()] = Number(state.weights[n.id] ?? 1); });
+  try {
+    const r = await api("POST", "/api/plan-tradeoff", {
+      network: payloadFromUI(),
+      weights,
+    });
+    renderTradeoffResult(r);
+    $("#section-tradeoff").scrollIntoView({ behavior: "smooth" });
   } catch (err) {
     showErrors(String(err.message).split("\n"));
   }
@@ -793,6 +946,7 @@ $("#table-plans").addEventListener("click", async (e) => {
   state.nodes = snap.nodes.map((n) => ({ ...n }));
   state.segments = snap.segments.map((s) => ({ ...s }));
   state.valves = snap.valves.map((v) => ({ ...v }));
+  clearTradeoffResult();
   renderAll();
   delete plan.network_snapshot;
   renderResult(plan);
@@ -811,10 +965,12 @@ $("#btn-clear").addEventListener("click", async () => {
   await api("POST", "/api/clear");
   state.nodes = []; state.segments = []; state.valves = [];
   state.candidates = [];
+  state.weights = {};
   state.result = null;
   $("#result-body").innerHTML = "";
   $("#result-banner").classList.add("hidden");
   clearSitingResult();
+  clearTradeoffResult();
   renderAll();
   loadHistory();
 });
@@ -864,11 +1020,13 @@ function applyNetwork(net) {
   state.segments = (net.segments || []).map((s) => ({ ...s }));
   state.valves = (net.valves || []).map((v) => ({ ...v }));
   state.candidates = [];
+  state.weights = {};
   state.layout.clear();
   state.result = null;
   $("#result-body").innerHTML = "";
   $("#result-banner").classList.add("hidden");
   clearSitingResult();
+  clearTradeoffResult();
   renderAll();
 }
 
@@ -956,6 +1114,17 @@ function drawCanvas() {
   const nodeStatus = new Map(
     ((state.result && state.result.node_status) || []).map((n) => [n.id, n.status])
   );
+
+  // 权衡预览查看某方案时, Canvas 以该方案为准(覆盖常规/备援结果)
+  const to = state.tradeoff && state.tradeoff.options
+    ? state.tradeoff.options[state.tradeoffIndex] : null;
+  if (to) {
+    to.closed_valves.forEach((v) => closedSet.add(v));
+    segStatus.clear();
+    nodeStatus.clear();
+    to.segment_status.forEach((s) => segStatus.set(s.id, s.status));
+    to.node_status.forEach((n) => nodeStatus.set(n.id, n.status));
+  }
 
   // 管段
   for (const s of state.segments) {

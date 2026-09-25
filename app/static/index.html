@@ -75,6 +75,18 @@
     </div>
 
     <div class="card">
+      <h3>普通节点用水权重（用于关阀成本与断水影响权衡预览，正整数）</h3>
+      <table id="table-weights">
+        <thead><tr><th>普通节点</th><th>用水权重(正整数)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p>
+        <button id="btn-plan-tradeoff" type="button" class="primary">权衡预览求解</button>
+        <span class="role-name" id="tradeoff-hint"></span>
+      </p>
+    </div>
+
+    <div class="card">
       <h3>管网示意</h3>
       <canvas id="canvas" width="960" height="420"></canvas>
       <div class="legend">
@@ -101,8 +113,14 @@
     <div id="siting-body"></div>
   </section>
 
+  <section id="section-tradeoff">
+    <h2>④ 关阀成本与断水影响权衡预览（只读，不写入管网与历史方案）</h2>
+    <div id="tradeoff-banner" class="banner hidden"></div>
+    <div id="tradeoff-body"></div>
+  </section>
+
   <section id="section-history">
-    <h2>④ 历史方案</h2>
+    <h2>⑤ 历史方案</h2>
     <table id="table-plans">
       <thead><tr><th>#</th><th>时间(UTC)</th><th>类型</th><th>是否可行</th><th>总代价</th><th>关闭阀门</th><th></th></tr></thead>
       <tbody></tbody>

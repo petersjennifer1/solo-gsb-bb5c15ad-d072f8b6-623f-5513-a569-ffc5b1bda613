@@ -6,6 +6,7 @@ API:
   POST /api/plan                    常规求解并保存方案
   POST /api/plan-failover           单阀失效备援求解并保存方案
   POST /api/plan-siting             新增阀门选址预览(只读, 不写管网/不入库)
+  POST /api/plan-tradeoff           关阀成本与断水影响权衡预览(只读, 不写管网/不入库)
   GET  /api/plans                   最近方案列表
   GET  /api/plans/{id}              方案详情(含节点/管段状态)
   POST /api/plans/{id}/sequence     可行方案的现场执行顺序规划(只读计算)
@@ -28,7 +29,8 @@ from pydantic import BaseModel, Field, field_validator
 import database
 from demo import DEMO_NETWORK
 from solver import (MAX_VALVES, NetworkValidationError, plan_jumpers,
-                    plan_sequence, solve, solve_failover, solve_siting)
+                    plan_sequence, solve, solve_failover, solve_siting,
+                    solve_tradeoff)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -100,6 +102,16 @@ class SitingIn(BaseModel):
     """选址预览请求: 当前编辑中的管网(可空, 空则用已保存管网) + 候选位置。"""
     network: NetworkIn | None = None
     candidates: list[CandidateIn] = Field(default_factory=list)
+
+
+class TradeoffIn(BaseModel):
+    """关阀成本与断水影响权衡预览请求。
+
+    当前编辑中的管网(可空, 空则用已保存管网) + 每个普通节点的正整数
+    用水权重(键=节点编号)。只读预览: 不写管网、不写入历史方案。
+    """
+    network: NetworkIn | None = None
+    weights: dict[str, Any] = Field(default_factory=dict)
 
 
 class JumperIn(BaseModel):
@@ -207,6 +219,28 @@ def create_siting_plan(req: SitingIn) -> dict:
     try:
         return solve_siting(payload,
                             [c.model_dump() for c in req.candidates])
+    except NetworkValidationError as exc:
+        raise HTTPException(status_code=422,
+                            detail={"errors": exc.errors})
+
+
+@app.post("/api/plan-tradeoff")
+def create_tradeoff_preview(req: TradeoffIn) -> dict:
+    """关阀成本与断水影响权衡预览(独立 API, 只读: 不写管网、不写历史方案)。
+
+    对当前编辑中的管网(请求体未带 network 时使用已保存管网), 用每个普通
+    节点的正整数用水权重, 枚举全部关阀组合, 仅保留全部漏点与进水点断开且
+    全部必保点仍有水的方案; 以(关阀代价合计, 原本有水而关阀后断水的普通
+    节点用水权重和)为双目标返回全部非支配方案, 同一对指标只保留关阀编号
+    升序列表字典序最小者, 按(代价, 断水影响, 编号)排序。
+    """
+    if req.network is not None:
+        payload = _payload(req.network)
+    else:
+        with database.get_conn() as conn:
+            payload = database.load_network(conn)
+    try:
+        return solve_tradeoff(payload, req.weights)
     except NetworkValidationError as exc:
         raise HTTPException(status_code=422,
                             detail={"errors": exc.errors})

@@ -111,3 +111,7 @@ canvas {
 .tag.closed { background: #fdecea; color: #8a1c14; }
 .tag.dead { background: #eceff3; color: #5a6b7c; }
 .role-name { color: #5a6b7c; }
+tr.option-row { cursor: pointer; }
+tr.option-row:hover { background: #eef4f9; }
+tr.option-row.selected { background: #dcebf5; }
+tr.option-row.selected td { border-bottom-color: #9fc6de; }
