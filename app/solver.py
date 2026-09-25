@@ -37,6 +37,13 @@
 点有水; 先最大化由断水转为有水的普通节点数, 再最小化铺设费合计, 并列时
 按跨接编号升序列表字典序选取; 无法恢复普通节点时返回空方案。
 
+以及 solve_tradeoff(payload, raw_weights): 关阀成本与断水影响权衡预览
+(只读计算, 针对当前编辑管网)。为每个普通节点录入正整数用水权重, 枚举
+全部关阀子集, 仅保留全部漏点与进水点断开且全部必保点仍有水的方案, 以
+(关阀代价合计, 原本有水而关阀后断水的普通节点权重和) 为双目标, 返回
+全部非支配方案; 同一对指标只保留关阀编号升序列表字典序最小者, 结果按
+(代价, 断水影响, 关阀编号列表) 升序排列。
+
 阀门最多 14 个, 枚举全部 2^V 个子集(V<=14 => 16384), 对每个子集做
 BFS 连通性检查即可, 简单且确定。
 """
@@ -1251,4 +1258,146 @@ def plan_jumpers(snapshot: dict[str, Any],
         "node_status": statuses["node_status"],
         "segment_status": statuses["segment_status"],
         "message": message,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 关阀成本与断水影响权衡预览(只读计算, 针对当前编辑管网)
+# ---------------------------------------------------------------------------
+
+def solve_tradeoff(payload: dict[str, Any],
+                   raw_weights: Any) -> dict[str, Any]:
+    """关阀成本与断水影响权衡预览(只读计算, 不写管网、不入库方案)。
+
+    为每个普通节点录入正整数用水权重(录入的键必须恰好是全部普通节点
+    编号)。枚举全部关阀子集, 仅保留全部漏点与进水点断开且全部必保点
+    仍有水的方案, 对每个方案计算双目标:
+      1) 关阀代价合计 = 被关闭阀门的关闭代价之和;
+      2) 断水影响 = 原本(不关阀时)有水、关阀后断水的普通节点用水权重
+         之和(原本就断水的普通节点不计入)。
+    同一对指标只保留关阀编号升序列表字典序最小的方案; 返回全部非支配
+    方案(不存在另一可行方案代价与断水影响都不更大且至少一项严格更小),
+    按 (关阀代价合计, 断水影响, 关阀编号升序列表) 升序排列。
+    """
+    nodes, segments, valves = validate_network(payload)
+    g = _Graph(nodes, segments, valves)
+
+    # ---- 用水权重录入校验: 键恰好是普通节点集合, 值为正整数 ----
+    normal_ids = sorted(nd["id"] for nd in nodes if nd["role"] == "normal")
+    normal_set = set(normal_ids)
+    label_of = {nd["id"]: nd["label"] for nd in nodes}
+    errors: list[str] = []
+    raw_w = raw_weights if isinstance(raw_weights, dict) else {}
+    weights: dict[str, int] = {}
+    missing = [nid for nid in normal_ids if nid not in raw_w]
+    extra = sorted(k for k in raw_w if k not in normal_set)
+    if missing:
+        errors.append("缺少普通节点的用水权重: " + ", ".join(missing))
+    if extra:
+        errors.append("提供了非普通节点的用水权重(多余编号): "
+                      + ", ".join(extra))
+    for nid in normal_ids:
+        if nid in raw_w:
+            val = _positive_int(raw_w[nid])
+            if val is None:
+                errors.append(f"普通节点 {nid} 的用水权重必须是正整数, "
+                              f"收到: {raw_w[nid]!r}")
+            else:
+                weights[nid] = val
+    if errors:
+        raise NetworkValidationError(errors)
+
+    # ---- 前置检查(与常规规划一致) ----
+    if not g.inlet_set:
+        return _infeasible("NO_INLET",
+                           "管网中没有进水点, 任何方案都无法供水。",
+                           solver="tradeoff")
+    base_reach = g.reachable(0, g.inlet_set)
+    already_off = g.keep_bits & ~base_reach
+    if already_off:
+        names = [g.nodes[i]["id"] for i in range(g.n)
+                 if (already_off >> i) & 1]
+        return _infeasible(
+            "GUARANTEED_ALREADY_DISCONNECTED",
+            "即使不关任何阀门, 以下必保点也无法连通任何进水点(关阀只会进一步"
+            "减少连通性, 故无解): " + ", ".join(names),
+            {"starved_guaranteed": names},
+            solver="tradeoff")
+
+    # 原本(不关阀时)有水的普通节点: 只有它们计入断水影响
+    base_fed_normal = [nid for nid in normal_ids
+                       if (base_reach >> g.idx[nid]) & 1]
+    base_fed_set = set(base_fed_normal)
+
+    # ---- 枚举全部关阀子集: 同一对(代价, 断水影响)只留字典序最小关阀清单 ----
+    subset_cost = g.subset_costs()
+    isolating_count = 0
+    feasible_count = 0
+    best_by_pair: dict[tuple[int, int], tuple[tuple[str, ...], int]] = {}
+    for m in range(g.total_masks):
+        fed = g.reachable(m, g.inlet_set)
+        if (fed & g.leak_bits) != 0:
+            continue
+        isolating_count += 1
+        if (fed & g.keep_bits) != g.keep_bits:
+            continue
+        feasible_count += 1
+        impact = 0
+        for nid in base_fed_normal:
+            if not (fed >> g.idx[nid]) & 1:
+                impact += weights[nid]
+        closed = tuple(g.closed_names(m))
+        key = (subset_cost[m], impact)
+        cur = best_by_pair.get(key)
+        if cur is None or closed < cur[0]:
+            best_by_pair[key] = (closed, m)
+
+    if not best_by_pair:
+        result = _explain_infeasible(g, isolating_count)
+        result["solver"] = "tradeoff"
+        return result
+
+    # ---- 非支配方案: 按代价升序扫描, 断水影响严格刷新最小值才入选 ----
+    plans: list[dict[str, Any]] = []
+    min_impact: int | None = None
+    for (cost, impact), (closed, m) in sorted(best_by_pair.items()):
+        if min_impact is not None and impact >= min_impact:
+            continue  # 被此前某方案支配(代价不更高且断水影响更小)
+        min_impact = impact
+        fed = g.reachable(m, g.inlet_set)
+        newly = [nid for nid in base_fed_normal
+                 if not (fed >> g.idx[nid]) & 1]
+        plans.append({
+            "closed_valves": list(closed),
+            "closed_count": len(closed),
+            "total_cost": cost,
+            "impact": impact,
+            "newly_disconnected": newly,
+            "newly_disconnected_details": [
+                {"id": nid, "label": label_of[nid], "weight": weights[nid]}
+                for nid in newly
+            ],
+        })
+
+    # 结果按 (代价, 断水影响, 关阀编号升序列表) 排序(扫描顺序已满足, 显式排一次)
+    plans.sort(key=lambda p: (p["total_cost"], p["impact"], p["closed_valves"]))
+
+    return {
+        "feasible": True,
+        "solver": "tradeoff",
+        "weights": weights,
+        "normal_nodes": normal_ids,
+        "baseline_fed_normal": base_fed_normal,
+        "baseline_disconnected_normal": [nid for nid in normal_ids
+                                         if nid not in base_fed_set],
+        "subset_count": g.total_masks,
+        "isolating_subset_count": isolating_count,
+        "feasible_subset_count": feasible_count,
+        "plan_count": len(plans),
+        "plans": plans,
+        "message": (
+            f"权衡预览(只读, 不写入管网与历史方案): 枚举 {g.total_masks} 个"
+            f"关阀组合, 其中 {feasible_count} 个满足漏点全隔离且必保点全有"
+            f"水; 按(关阀代价合计, 断水影响)双目标求得非支配方案 "
+            f"{len(plans)} 个, 已按代价、断水影响升序排列。"),
     }
