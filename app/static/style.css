@@ -1,0 +1,113 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: #f4f6f9;
+  color: #22303f;
+}
+header {
+  background: linear-gradient(120deg, #145a8c, #1c7fb3);
+  color: #fff;
+  padding: 18px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+header h1 { font-size: 22px; margin: 0; }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+button {
+  border: 1px solid #b9c7d4;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+}
+button:hover { background: #eef4f9; }
+button.primary { background: #e07b25; border-color: #c96a18; color: #fff; font-weight: 600; }
+button.primary:hover { background: #cf6d1a; }
+button.secondary { background: rgba(255,255,255,.92); }
+button.danger { color: #b3261e; border-color: #e0b4b0; }
+main { max-width: 1280px; margin: 0 auto; padding: 20px; }
+section { margin-bottom: 26px; }
+h2 { font-size: 18px; border-left: 4px solid #1c7fb3; padding-left: 10px; }
+h3 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+.grid-three { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1000px) { .grid-three, .grid-two { grid-template-columns: 1fr; } }
+.card {
+  background: #fff;
+  border: 1px solid #e1e7ee;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border-bottom: 1px solid #e8edf2; padding: 6px 8px; text-align: left; }
+th { color: #5a6b7c; font-weight: 600; }
+td input, td select {
+  width: 100%;
+  border: 1px solid #cfd9e2;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 13px;
+}
+td.act { width: 40px; text-align: center; }
+td.act button { border: none; background: none; color: #b3261e; font-size: 15px; padding: 0 4px; }
+.add-row { margin-top: 8px; border-style: dashed; color: #1c7fb3; width: 100%; }
+.hidden { display: none !important; }
+.errors {
+  background: #fdecea;
+  border: 1px solid #e8b4ae;
+  color: #8a1c14;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+.errors ul { margin: 6px 0 0; padding-left: 20px; }
+.banner {
+  border-radius: 8px;
+  padding: 14px 18px;
+  font-size: 15px;
+  margin-bottom: 14px;
+}
+.banner.ok { background: #e8f6ec; border: 1px solid #9fd4af; color: #1e6b35; }
+.banner.bad { background: #fdecea; border: 1px solid #e8b4ae; color: #8a1c14; }
+.banner .big { font-size: 20px; font-weight: 700; margin-right: 10px; }
+.summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; font-size: 14px; }
+.summary b { font-size: 16px; }
+#node-role-filter { font-size: 12px; padding: 2px 4px; }
+canvas {
+  width: 100%;
+  border: 1px solid #e1e7ee;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: #5a6b7c; }
+.legend i { display: inline-block; margin-right: 4px; vertical-align: middle; }
+.dot { width: 12px; height: 12px; border-radius: 50%; }
+.dot.inlet { background: #1c7fb3; }
+.dot.leak { background: #d13221; }
+.dot.keep { background: #2f9e44; }
+.dot.normal { background: #8a98a6; }
+.line { width: 22px; height: 0; border-top-width: 4px; border-top-style: solid; }
+.line.closed { border-top-color: #d13221; border-top-style: dashed; }
+.line.flowing { border-top-color: #1c7fb3; }
+.line.dead { border-top-color: #b9c2cb; }
+.tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.tag.supplied, .tag.inlet_supply { background: #e8f6ec; color: #1e6b35; }
+.tag.isolated { background: #fff3e0; color: #b56a00; }
+.tag.leak_not_isolated { background: #fdecea; color: #8a1c14; }
+.tag.disconnected { background: #eceff3; color: #5a6b7c; }
+.tag.flowing { background: #e4f0f8; color: #145a8c; }
+.tag.closed { background: #fdecea; color: #8a1c14; }
+.tag.dead { background: #eceff3; color: #5a6b7c; }
+.role-name { color: #5a6b7c; }

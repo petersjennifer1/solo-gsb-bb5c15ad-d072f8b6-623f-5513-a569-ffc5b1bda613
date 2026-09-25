@@ -1,0 +1,13 @@
+services:
+  pipeline-planner:
+    build: .
+    image: pipeline-leak-planner:1.0
+    container_name: pipeline-leak-planner
+    ports:
+      - "8000:8000"
+    volumes:
+      - pipeline-data:/data
+    restart: unless-stopped
+
+volumes:
+  pipeline-data:

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管网漏点隔离规划台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>管网漏点隔离规划台</h1>
+  <div class="toolbar">
+    <button id="btn-demo" type="button">载入示例管网</button>
+    <button id="btn-clear" type="button" class="secondary">清空输入</button>
+    <button id="btn-save" type="button" class="secondary">保存输入</button>
+    <button id="btn-plan" type="button" class="primary">求解最优关阀方案</button>
+    <button id="btn-plan-failover" type="button" class="primary">求解单阀失效备援方案</button>
+  </div>
+</header>
+
+<main>
+  <section id="section-input">
+    <h2>① 管网输入</h2>
+
+    <div class="grid-three">
+      <div class="card">
+        <h3>节点
+          <select id="node-role-filter" title="按角色筛选">
+            <option value="">全部角色</option>
+            <option value="inlet">进水点</option>
+            <option value="leak">漏点</option>
+            <option value="must_keep">必保供水点</option>
+            <option value="normal">普通点</option>
+          </select>
+        </h3>
+        <table id="table-nodes">
+          <thead><tr><th>编号</th><th>角色</th><th>名称(可选)</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="add-row" data-table="nodes" type="button">＋ 添加节点</button>
+      </div>
+
+      <div class="card">
+        <h3>无向管段</h3>
+        <table id="table-segments">
+          <thead><tr><th>编号</th><th>端点A</th><th>端点B</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="add-row" data-table="segments" type="button">＋ 添加管段</button>
+      </div>
+
+      <div class="card">
+        <h3>阀门（最多 14 个）</h3>
+        <table id="table-valves">
+          <thead><tr><th>编号</th><th>绑定管段</th><th>关闭代价</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <button class="add-row" data-table="valves" type="button">＋ 添加阀门</button>
+      </div>
+    </div>
+
+    <div id="input-errors" class="errors hidden"></div>
+
+    <div class="card">
+      <h3>新增阀门选址候选（至多 6 个，限尚无阀门的管段）</h3>
+      <table id="table-candidates">
+        <thead><tr><th>新阀编号</th><th>安装管段</th><th>安装费</th><th>关阀代价</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="add-row" data-table="candidates" type="button">＋ 添加候选位置</button>
+      <p>
+        <button id="btn-plan-siting" type="button" class="primary">选址预览求解</button>
+        <span class="role-name" id="siting-hint"></span>
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>管网示意</h3>
+      <canvas id="canvas" width="960" height="420"></canvas>
+      <div class="legend">
+        <span><i class="dot inlet"></i>进水点</span>
+        <span><i class="dot leak"></i>漏点</span>
+        <span><i class="dot keep"></i>必保点</span>
+        <span><i class="dot normal"></i>普通点</span>
+        <span><i class="line closed"></i>关闭管段</span>
+        <span><i class="line flowing"></i>通水</span>
+        <span><i class="line dead"></i>停水管段</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="section-result">
+    <h2>② 关阀清单与隔离后供水状态</h2>
+    <div id="result-banner" class="banner hidden"></div>
+    <div id="result-body"></div>
+  </section>
+
+  <section id="section-siting">
+    <h2>③ 新增阀门选址预览（只读，不写入管网与历史方案）</h2>
+    <div id="siting-banner" class="banner hidden"></div>
+    <div id="siting-body"></div>
+  </section>
+
+  <section id="section-history">
+    <h2>④ 历史方案</h2>
+    <table id="table-plans">
+      <thead><tr><th>#</th><th>时间(UTC)</th><th>类型</th><th>是否可行</th><th>总代价</th><th>关闭阀门</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
